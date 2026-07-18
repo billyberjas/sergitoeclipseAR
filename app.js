@@ -1,5 +1,5 @@
-// Orquestación: permisos, geolocalización, cámara, brújula/inclinómetro,
-// bucle de proyección AR, vista radar, perfil de horizonte y panel info.
+// Orquestación: permisos (individuales, pestaña "Permisos"), geolocalización,
+// cámara, brújula/inclinómetro, bucle de proyección AR, radar y horizonte.
 
 const DEFAULT_LOCATION = { lat: 40.5057, lon: -3.5354 }; // Paracuellos de Jarama (aprox.), usado si no hay GPS
 
@@ -7,11 +7,15 @@ const FOV_H = 65; // grados, campo de visión horizontal aproximado de cámara t
 const FOV_V = 50; // grados, campo de visión vertical aproximado
 
 const state = {
-  lat: null, lon: null, accuracy: null, usingDefaultLocation: false,
-  locationStatus: 'pending', // 'pending' | 'ok' | 'denied' | 'unavailable' | 'unsupported'
+  lat: null, lon: null, accuracy: null,
   heading: null, // grados, 0 = Norte, brújula
   beta: null,    // inclinación del dispositivo (deviceorientation)
   sun: null,     // { azimuth, altitude } en el punto actual
+  perms: {
+    geolocation: { status: 'unknown' },
+    camera: { status: 'unknown' },
+    orientation: { status: 'unknown' },
+  },
 };
 
 // ---------- Utilidades ----------
@@ -25,33 +29,39 @@ function updateSunForCurrentLocation() {
   const lat = state.lat ?? DEFAULT_LOCATION.lat;
   const lon = state.lon ?? DEFAULT_LOCATION.lon;
   state.sun = Sun.positionAtTotality(lat, lon);
-  refreshInfoPanel();
   refreshLocationChip();
 }
 
-const LOCATION_STATUS_TEXT = {
+function setPerm(name, status) {
+  state.perms[name].status = status;
+  renderPermisosTab();
+  refreshLocationChip();
+}
+
+// ---------- Chip de ubicación (visible en todas las pestañas) ----------
+const LOCATION_CHIP_TEXT = {
+  unknown: '📍 Ubicación no concedida — toca para ir a Permisos',
   pending: '📍 Buscando tu ubicación…',
-  ok: null, // se genera con las coordenadas reales, ver refreshLocationChip
-  denied: '📍 Permiso de ubicación denegado — toca para reintentar',
-  unavailable: '📍 No se pudo obtener el GPS (sin señal o tardó demasiado) — toca para reintentar',
-  unsupported: '📍 Este navegador no soporta geolocalización',
+  denied: '📍 Ubicación denegada — toca para ir a Permisos',
+  unavailable: '📍 Sin GPS, usando Paracuellos por defecto — toca para ir a Permisos',
+  unsupported: '📍 Sin soporte de GPS, usando Paracuellos por defecto',
 };
 
 function refreshLocationChip() {
   const chip = document.getElementById('loc-chip');
   if (!chip) return;
-  chip.classList.toggle('warn', state.locationStatus !== 'ok');
-  if (state.locationStatus === 'ok') {
+  const g = state.perms.geolocation.status;
+  chip.classList.toggle('warn', g !== 'granted');
+  if (g === 'granted') {
     chip.textContent = `📍 GPS: ${fmt(state.lat, 4)}, ${fmt(state.lon, 4)}` +
       (state.accuracy ? ` (±${Math.round(state.accuracy)} m)` : '');
   } else {
-    chip.textContent = LOCATION_STATUS_TEXT[state.locationStatus] || LOCATION_STATUS_TEXT.unavailable;
+    chip.textContent = LOCATION_CHIP_TEXT[g] || LOCATION_CHIP_TEXT.unavailable;
   }
 }
 
-// ---------- Geolocalización ----------
+// ---------- Ubicación ----------
 let geoWatchId = null;
-
 function stopGeolocation() {
   if (geoWatchId !== null && 'geolocation' in navigator) {
     navigator.geolocation.clearWatch(geoWatchId);
@@ -63,65 +73,31 @@ function stopGeolocation() {
 // señal, exigir alta precisión puede agotar el timeout sin dar nunca una
 // posición, mientras que una posición aproximada (por red/wifi) sigue
 // siendo mucho mejor que quedarse en el valor por defecto de Paracuellos.
-function startGeolocation(highAccuracy = true) {
-  return new Promise((resolve) => {
-    if (!('geolocation' in navigator)) {
-      state.locationStatus = 'unsupported';
-      state.usingDefaultLocation = true;
+function requestGeolocationPermission(highAccuracy = true) {
+  if (!('geolocation' in navigator)) { setPerm('geolocation', 'unsupported'); return; }
+  setPerm('geolocation', 'pending');
+  stopGeolocation();
+  let resolved = false;
+  geoWatchId = navigator.geolocation.watchPosition(
+    (pos) => {
+      state.lat = pos.coords.latitude;
+      state.lon = pos.coords.longitude;
+      state.accuracy = pos.coords.accuracy;
       updateSunForCurrentLocation();
-      resolve(false);
-      return;
-    }
-    stopGeolocation();
-    let resolved = false;
-    geoWatchId = navigator.geolocation.watchPosition(
-      (pos) => {
-        state.lat = pos.coords.latitude;
-        state.lon = pos.coords.longitude;
-        state.accuracy = pos.coords.accuracy;
-        state.usingDefaultLocation = false;
-        state.locationStatus = 'ok';
-        updateSunForCurrentLocation();
-        if (!resolved) { resolved = true; resolve(true); }
-      },
-      (err) => {
-        if (!resolved) {
-          resolved = true;
-          if (err.code === err.PERMISSION_DENIED) {
-            state.locationStatus = 'denied';
-            state.usingDefaultLocation = true;
-            updateSunForCurrentLocation();
-            resolve(false);
-          } else if (highAccuracy) {
-            // Reintento único con precisión reducida antes de rendirnos.
-            resolve(startGeolocation(false));
-          } else {
-            state.locationStatus = 'unavailable';
-            state.usingDefaultLocation = true;
-            updateSunForCurrentLocation();
-            resolve(false);
-          }
-        }
-      },
-      { enableHighAccuracy: highAccuracy, maximumAge: 5000, timeout: 10000 }
-    );
-    // por si watchPosition tarda más de lo esperado en la primera respuesta
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        state.locationStatus = 'unavailable';
-        state.usingDefaultLocation = true;
-        updateSunForCurrentLocation();
-        resolve(false);
-      }
-    }, 10000);
-  });
-}
-
-function retryGeolocation() {
-  state.locationStatus = 'pending';
-  updateSunForCurrentLocation();
-  startGeolocation(true);
+      if (!resolved) { resolved = true; setPerm('geolocation', 'granted'); }
+    },
+    (err) => {
+      if (resolved) return;
+      resolved = true;
+      if (err.code === err.PERMISSION_DENIED) setPerm('geolocation', 'denied');
+      else if (highAccuracy) requestGeolocationPermission(false);
+      else setPerm('geolocation', 'unavailable');
+    },
+    { enableHighAccuracy: highAccuracy, maximumAge: 5000, timeout: 10000 }
+  );
+  setTimeout(() => {
+    if (!resolved) { resolved = true; setPerm('geolocation', 'unavailable'); }
+  }, 10000);
 }
 
 // ---------- Orientación del dispositivo ----------
@@ -136,36 +112,123 @@ function handleOrientation(e) {
   }
   if (heading !== null) state.heading = heading;
   if (e.beta !== null) state.beta = e.beta;
+  if (heading !== null && state.perms.orientation.status !== 'granted') setPerm('orientation', 'granted');
 }
 
-async function startOrientation() {
+async function requestOrientationPermission() {
   const DOE = window.DeviceOrientationEvent;
-  if (DOE && typeof DOE.requestPermission === 'function') {
+  if (!DOE) { setPerm('orientation', 'unsupported'); return; }
+  setPerm('orientation', 'pending');
+  if (typeof DOE.requestPermission === 'function') {
     try {
       const res = await DOE.requestPermission();
-      if (res !== 'granted') return false;
+      if (res !== 'granted') { setPerm('orientation', 'denied'); return; }
     } catch (err) {
-      return false;
+      setPerm('orientation', 'denied');
+      return;
     }
   }
   const evName = 'ondeviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation';
   window.addEventListener(evName, handleOrientation, true);
-  return true;
+  // Algunos navegadores "conceden" el permiso pero el sensor nunca manda
+  // datos reales (sin magnetómetro, o bloqueado a nivel de sistema).
+  setTimeout(() => {
+    if (state.perms.orientation.status === 'pending') setPerm('orientation', 'unavailable');
+  }, 2000);
 }
 
 // ---------- Cámara ----------
-async function startCamera() {
-  const video = document.getElementById('ar-video');
+let arLoopStarted = false;
+async function requestCameraPermission() {
+  setPerm('camera', 'pending');
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: 'environment' } },
       audio: false
     });
+    const video = document.getElementById('ar-video');
     video.srcObject = stream;
     await video.play();
-    return true;
+    setPerm('camera', 'granted');
+    if (!arLoopStarted) {
+      arLoopStarted = true;
+      setupArCanvas();
+      requestAnimationFrame(drawArFrame);
+    }
   } catch (err) {
-    return false;
+    setPerm('camera', err.name === 'NotAllowedError' ? 'denied' : 'unavailable');
+  }
+}
+
+// ---------- Pestaña Permisos ----------
+const PERM_META = {
+  geolocation: { label: 'Ubicación (GPS)', ask: () => requestGeolocationPermission(true) },
+  camera: { label: 'Cámara', ask: requestCameraPermission },
+  orientation: { label: 'Brújula / orientación', ask: requestOrientationPermission },
+};
+
+const STATUS_META = {
+  unknown: { icon: '⏳', text: 'sin pedir todavía', cls: '' },
+  pending: { icon: '⏳', text: 'pidiendo permiso…', cls: '' },
+  granted: { icon: '✅', text: 'concedido', cls: 'ok' },
+  denied: { icon: '❌', text: 'denegado', cls: 'bad' },
+  unavailable: { icon: '⚠️', text: 'sin datos — revisa ajustes o el sensor', cls: 'bad' },
+  unsupported: { icon: '🚫', text: 'no soportado por este navegador', cls: 'bad' },
+};
+
+const PERM_HELP = {
+  geolocation: 'Actívalo a mano: toca el icono "aA" (Safari) o el candado/ⓘ (Chrome) junto a la barra de direcciones → Configuración del sitio web → Ubicación → Permitir. Si no aparece esa opción, revisa Ajustes del sistema → Privacidad y seguridad → Localización → que el navegador tenga acceso. Luego pulsa "Reintentar".',
+  camera: 'Actívalo a mano: toca el icono "aA" (Safari) o el candado/ⓘ (Chrome) junto a la barra de direcciones → Configuración del sitio web → Cámara → Permitir. Si no aparece esa opción, revisa Ajustes del sistema → Privacidad y seguridad → Cámara → que el navegador tenga acceso. Luego pulsa "Reintentar".',
+  orientation: 'Revisa Ajustes → Safari → "Acceso a movimiento y orientación" (activado). Esa opción es del motor del sistema, así que también afecta a Chrome en iOS. Si ya estaba activada, prueba Ajustes → Safari → Avanzado → Datos de sitios web → busca este sitio → elimínalo, recarga la página y pulsa "Reintentar".',
+};
+
+function renderPermisosTab() {
+  const wrap = document.getElementById('perm-list');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  Object.entries(PERM_META).forEach(([key, meta]) => {
+    const p = state.perms[key];
+    const sm = STATUS_META[p.status];
+    const card = document.createElement('div');
+    card.className = 'perm-card';
+    card.innerHTML = `
+      <div class="perm-row">
+        <span>${sm.icon} <b>${meta.label}</b></span>
+        <button class="perm-btn" data-perm="${key}" ${p.status === 'pending' ? 'disabled' : ''}>
+          ${p.status === 'pending' ? 'Pidiendo…' : 'Reintentar'}
+        </button>
+      </div>
+      <div class="perm-status ${sm.cls}">${sm.text}</div>
+      ${(p.status === 'denied' || p.status === 'unavailable') ? `<div class="perm-help">${PERM_HELP[key]}</div>` : ''}
+    `;
+    wrap.appendChild(card);
+  });
+  wrap.querySelectorAll('.perm-btn').forEach((btn) => {
+    btn.addEventListener('click', () => PERM_META[btn.dataset.perm].ask());
+  });
+}
+
+// Comprueba el estado ya concedido/denegado de sesiones anteriores sin
+// mostrar ningún diálogo (Permissions API; no existe equivalente para
+// DeviceOrientationEvent, así que la brújula siempre empieza en "unknown").
+function initPermissionQueries() {
+  if (!(navigator.permissions && navigator.permissions.query)) { renderPermisosTab(); return; }
+  ['geolocation', 'camera'].forEach((name) => {
+    navigator.permissions.query({ name }).then((status) => {
+      applyQueryState(name, status.state);
+      status.onchange = () => applyQueryState(name, status.state);
+    }).catch(() => { /* nombre no soportado en este navegador */ });
+  });
+}
+
+function applyQueryState(name, qState) {
+  if (qState === 'granted') {
+    if (name === 'geolocation' && state.perms.geolocation.status !== 'granted') requestGeolocationPermission(true);
+    if (name === 'camera' && state.perms.camera.status !== 'granted') requestCameraPermission();
+  } else if (qState === 'denied') {
+    setPerm(name, 'denied');
+  } else {
+    setPerm(name, 'unknown');
   }
 }
 
@@ -212,6 +275,8 @@ function drawArFrame() {
 
     hud.innerHTML = `Sol: <b>${fmt(state.sun.altitude)}°</b> altura · <b>${fmt(state.sun.azimuth)}°</b> azimut
       &nbsp;|&nbsp; Móvil: ${fmt(state.heading)}° rumbo, ${fmt(cameraElevation)}° elevación`;
+  } else if (state.perms.orientation.status !== 'granted') {
+    hud.innerHTML = 'Falta el permiso de brújula/orientación — ve a la pestaña <b>Permisos</b>.';
   } else {
     hud.textContent = 'Esperando datos de brújula/orientación…';
   }
@@ -354,15 +419,6 @@ function drawHorizonChart(canvas, profile, sunAlt) {
   ctx.fillStyle = 'rgba(74,222,128,.12)'; ctx.fill();
 }
 
-// ---------- Panel Info ----------
-function refreshInfoPanel() {
-  const el = document.getElementById('info-eclipse');
-  if (!el || !state.sun) return;
-  el.innerHTML = `Totalidad máxima: <b>12 ago 2026, 20:30 CEST</b> (aprox., varía unos minutos según el punto exacto).<br>
-    En tu posición actual, el Sol estará a <b>${fmt(state.sun.altitude)}°</b> de altura, azimut <b>${fmt(state.sun.azimuth)}°</b>.
-    ${state.usingDefaultLocation ? '<br><span class="pill">ubicación por defecto: Paracuellos de Jarama</span>' : '<span class="pill">usando tu GPS</span>'}`;
-}
-
 // ---------- Tabs ----------
 function setupTabs() {
   document.querySelectorAll('.tab').forEach(btn => {
@@ -374,52 +430,26 @@ function setupTabs() {
     });
   });
   document.getElementById('horizon-btn').addEventListener('click', analyzeHorizon);
-  document.getElementById('loc-chip').addEventListener('click', retryGeolocation);
+  document.getElementById('loc-chip').addEventListener('click', () => {
+    document.querySelector('.tab[data-view="permisos"]').click();
+  });
 }
 
 // ---------- Arranque ----------
-async function start() {
-  const status = document.getElementById('start-status');
+function init() {
   setupTabs();
-
-  // iOS exige que DeviceOrientationEvent.requestPermission() se llame lo
-  // más cerca posible del tap del usuario (sin otro permiso nativo de por
-  // medio) o el "user gesture" caduca y la petición falla en silencio.
-  // Por eso la orientación se pide ANTES que geolocalización/cámara.
-  status.textContent = 'Pidiendo permiso de orientación…';
-  const orientationOk = await startOrientation();
-
-  status.textContent = 'Pidiendo permiso de cámara…';
-  const cameraOk = await startCamera();
-
-  status.textContent = 'Obteniendo ubicación…';
-  await startGeolocation();
-
-  document.getElementById('start-screen').classList.add('hidden');
-
-  if (!orientationOk) {
-    document.getElementById('ar-warning').textContent =
-      'No se pudo activar la brújula del móvil. En iOS: Ajustes > Safari > ' +
-      'Movimiento y orientación debe estar activado, y recarga la página ' +
-      'volviendo a pulsar "Empezar" sin haber tocado antes otro permiso.';
-    document.getElementById('ar-warning').classList.add('show');
-  }
-
-  if (cameraOk) {
-    setupArCanvas();
-    requestAnimationFrame(drawArFrame);
-  } else {
-    // sin cámara: usar la pestaña radar por defecto
-    document.querySelector('.tab[data-view="radar"]').click();
-  }
+  updateSunForCurrentLocation(); // posición del sol con la ubicación por defecto, hasta tener GPS real
+  renderPermisosTab();
   drawRadar();
+  initPermissionQueries();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 }
+init();
 
 document.getElementById('start-btn').addEventListener('click', () => {
-  document.getElementById('start-btn').disabled = true;
-  start();
+  document.getElementById('start-screen').classList.add('hidden');
+  document.querySelector('.tab[data-view="permisos"]').click();
 });
