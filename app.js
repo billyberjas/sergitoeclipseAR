@@ -321,22 +321,34 @@ async function start() {
   const status = document.getElementById('start-status');
   setupTabs();
 
-  status.textContent = 'Obteniendo ubicación…';
-  await startGeolocation();
-
+  // iOS exige que DeviceOrientationEvent.requestPermission() se llame lo
+  // más cerca posible del tap del usuario (sin otro permiso nativo de por
+  // medio) o el "user gesture" caduca y la petición falla en silencio.
+  // Por eso la orientación se pide ANTES que geolocalización/cámara.
   status.textContent = 'Pidiendo permiso de orientación…';
   const orientationOk = await startOrientation();
 
   status.textContent = 'Pidiendo permiso de cámara…';
   const cameraOk = await startCamera();
 
+  status.textContent = 'Obteniendo ubicación…';
+  await startGeolocation();
+
   document.getElementById('start-screen').classList.add('hidden');
 
-  if (cameraOk && orientationOk) {
+  if (!orientationOk) {
+    document.getElementById('ar-warning').textContent =
+      'No se pudo activar la brújula del móvil. En iOS: Ajustes > Safari > ' +
+      'Movimiento y orientación debe estar activado, y recarga la página ' +
+      'volviendo a pulsar "Empezar" sin haber tocado antes otro permiso.';
+    document.getElementById('ar-warning').classList.add('show');
+  }
+
+  if (cameraOk) {
     setupArCanvas();
     requestAnimationFrame(drawArFrame);
   } else {
-    // sin cámara u orientación: usar la pestaña radar por defecto
+    // sin cámara: usar la pestaña radar por defecto
     document.querySelector('.tab[data-view="radar"]').click();
   }
   drawRadar();
