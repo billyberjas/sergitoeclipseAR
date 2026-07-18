@@ -2,7 +2,7 @@
 // el día del eclipse. El perfil de horizonte (Open-Meteo) necesita red y
 // no se cachea aquí a propósito: está pensado para usarse de antemano.
 
-const CACHE_NAME = 'eclipse-ar-v1';
+const CACHE_NAME = 'eclipse-ar-v2';
 const SHELL_FILES = [
   './',
   'index.html',
@@ -31,18 +31,21 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
-  // Solo servimos desde caché los ficheros propios del app shell (mismo
-  // origen); las llamadas a Open-Meteo siempre van a red.
+  // Solo interceptamos los ficheros propios del app shell (mismo origen);
+  // las llamadas a Open-Meteo siempre van directas a red.
   if (url.origin !== self.location.origin) return;
 
+  // Red primero: mientras haya conexión, siempre se sirve la versión más
+  // reciente (y se refresca la caché). Solo si la red falla (sin cobertura
+  // el día del eclipse) se recurre a la copia guardada. Con "cache primero"
+  // una versión vieja del service worker podía quedarse serviendo un
+  // app.js desactualizado indefinidamente, aunque ya estuviera arreglado
+  // en el servidor.
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request).then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return res;
-      }).catch(() => cached);
-    })
+    fetch(event.request).then((res) => {
+      const copy = res.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+      return res;
+    }).catch(() => caches.match(event.request))
   );
 });
