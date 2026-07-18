@@ -93,6 +93,24 @@ body{
 .perm-status.ok{ color:var(--ok); }
 .perm-status.bad{ color:var(--danger); }
 .perm-help{ font-size:.78rem; color:var(--muted); margin-top:8px; line-height:1.5; padding-top:8px; border-top:1px solid var(--line); }
+
+/* Guía view */
+#guia-wrap{ height:100%; overflow-y:auto; padding:16px; padding-bottom:calc(16px + env(safe-area-inset-bottom)); }
+#guia-wrap h2{ font-size:1rem; margin:18px 0 8px; }
+#guia-wrap h2:first-child{ margin-top:0; }
+#guia-wrap p{ color:var(--muted); font-size:.85rem; line-height:1.5; margin:0 0 8px; }
+#guia-wrap p b{ color:var(--text); }
+.guia-steps{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.guia-steps li{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 12px;
+  font-size:.85rem; line-height:1.45; display:flex; gap:10px; }
+.guia-steps .n{ flex:0 0 auto; width:22px; height:22px; border-radius:50%; background:var(--panel2); color:var(--accent);
+  font-size:.75rem; font-weight:700; display:flex; align-items:center; justify-content:center; }
+.guia-warn{ background:rgba(255,93,93,.12); border:1px solid var(--danger); border-radius:12px;
+  padding:10px 12px; font-size:.85rem; line-height:1.5; margin-bottom:10px; }
+.site-list{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.site-list li{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:10px 12px; font-size:.85rem; }
+.site-list b{ color:var(--accent); }
+.site-list .dur{ float:right; color:var(--text); font-weight:600; }
 </style>
 </head>
 <body>
@@ -108,6 +126,7 @@ body{
   <button class="tab" data-view="radar">Radar</button>
   <button class="tab" data-view="horizon">Horizonte</button>
   <button class="tab" data-view="permisos">Permisos</button>
+  <button class="tab" data-view="guia">Guía</button>
 </div>
 <button id="loc-chip">📍 Ubicación no concedida — toca para ir a Permisos</button>
 
@@ -140,6 +159,39 @@ body{
     <h2>Permisos del móvil</h2>
     <p class="hint">Cada permiso se pide con un toque directo sobre su propio botón — en iOS, pedir varios permisos encadenados sin un toque específico para cada uno hace que algunos fallen en silencio. Si aparece "denegado", la web ya no puede volver a preguntar: sigue las instrucciones para activarlo a mano.</p>
     <div id="perm-list"></div>
+  </div>
+</div>
+
+<div id="view-guia" class="view">
+  <div id="guia-wrap">
+    <h2>Cómo usar cada pestaña</h2>
+    <ul class="guia-steps">
+      <li><span class="n">1</span><span><b>Permisos:</b> concede ubicación, cámara y brújula. Cada uno tiene su propio botón — pídelos de uno en uno, sobre todo en iPhone.</span></li>
+      <li><span class="n">2</span><span><b>AR:</b> apunta la cámara del móvil hacia donde debería estar el Sol; aparece un círculo dorado superpuesto cuando lo encuadras, o una flecha indicando hacia dónde girar si está fuera de plano.</span></li>
+      <li><span class="n">3</span><span><b>Radar:</b> alternativa sin cámara — una brújula con un punto que marca el azimut del Sol y su altura en texto. Útil si no quieres o no puedes dar permiso de cámara.</span></li>
+      <li><span class="n">4</span><span><b>Horizonte:</b> comprueba el terreno real hacia el Sol usando datos de elevación (necesita internet), para descartar sitios con colinas de por medio antes de desplazarte.</span></li>
+    </ul>
+
+    <h2>Antes del día del eclipse (12 de agosto de 2026)</h2>
+    <ul class="guia-steps">
+      <li><span class="n">1</span><span>Concede los permisos con antelación desde la pestaña <b>Permisos</b> — así no pierdes tiempo con diálogos el día del evento.</span></li>
+      <li><span class="n">2</span><span>Abre la app varias veces con conexión para que quede guardada en el móvil: funciona sin cobertura el día 12 (excepto el análisis de <b>Horizonte</b>, que sí necesita red).</span></li>
+      <li><span class="n">3</span><span>El Sol estará muy bajo, a solo <b>~7° de altura</b>, hacia el <b>oeste-noroeste</b> (azimut ~283°). Busca sitios con vista despejada en esa dirección: evita valles, arboledas o edificios al oeste.</span></li>
+      <li><span class="n">4</span><span>Usa <b>Horizonte</b> para comparar varios sitios candidatos desde casa, y confírmalos in situ con <b>AR</b> cuando puedas visitarlos.</span></li>
+      <li><span class="n">5</span><span>Ve con tiempo el día del evento — se espera mucha afluencia y tráfico en los miradores dentro de la franja de totalidad.</span></li>
+      <li><span class="n">6</span><span>Lleva gafas de eclipse homologadas (norma <b>ISO 12312-2</b>) para las fases parciales.</span></li>
+    </ul>
+
+    <div class="guia-warn">⚠️ <b>Seguridad:</b> nunca mires al Sol directamente ni a través de la cámara del móvil sin gafas de eclipse homologadas, excepto durante los segundos exactos de <b>totalidad total</b> (cuando el disco queda completamente cubierto) y solo si estás dentro de la franja de totalidad. Fuera de esos segundos, incluida toda la fase parcial, usa siempre protección ocular adecuada.</div>
+
+    <h2>Sitios conocidos en la Comunidad de Madrid</h2>
+    <ul class="site-list">
+      <li><b>Somosierra</b><span class="dur">~1m 29s</span><br>La mayor duración de totalidad de la región.</li>
+      <li><b>Buitrago del Lozoya</b><span class="dur">~1m 19s</span></li>
+      <li><b>La Cabrera</b><span class="dur">~1m 11s</span></li>
+      <li><b>Mirador de Miramadrid, Paracuellos de Jarama</b><span class="dur">~30-32s</span><br>Evento oficial del ayuntamiento, pero cerca del borde sur de la franja.</li>
+    </ul>
+    <p style="margin-top:10px">Duraciones aproximadas de fuentes públicas — verifica siempre con la pestaña Horizonte y la vista AR antes del día del evento.</p>
   </div>
 </div>
 
