@@ -1,0 +1,10 @@
+{
+  "name": "Sol Eclipse 12 ago 2026",
+  "short_name": "Sol Eclipse",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0b0f1a",
+  "theme_color": "#0b0f1a",
+  "orientation": "portrait",
+  "icons": []
+}
