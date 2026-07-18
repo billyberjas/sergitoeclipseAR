@@ -7,7 +7,8 @@ const FOV_H = 65; // grados, campo de visión horizontal aproximado de cámara t
 const FOV_V = 50; // grados, campo de visión vertical aproximado
 
 const state = {
-  lat: null, lon: null, usingDefaultLocation: false,
+  lat: null, lon: null, accuracy: null, usingDefaultLocation: false,
+  locationStatus: 'pending', // 'pending' | 'ok' | 'denied' | 'unavailable' | 'unsupported'
   heading: null, // grados, 0 = Norte, brújula
   beta: null,    // inclinación del dispositivo (deviceorientation)
   sun: null,     // { azimuth, altitude } en el punto actual
@@ -25,42 +26,102 @@ function updateSunForCurrentLocation() {
   const lon = state.lon ?? DEFAULT_LOCATION.lon;
   state.sun = Sun.positionAtTotality(lat, lon);
   refreshInfoPanel();
+  refreshLocationChip();
+}
+
+const LOCATION_STATUS_TEXT = {
+  pending: '📍 Buscando tu ubicación…',
+  ok: null, // se genera con las coordenadas reales, ver refreshLocationChip
+  denied: '📍 Permiso de ubicación denegado — toca para reintentar',
+  unavailable: '📍 No se pudo obtener el GPS (sin señal o tardó demasiado) — toca para reintentar',
+  unsupported: '📍 Este navegador no soporta geolocalización',
+};
+
+function refreshLocationChip() {
+  const chip = document.getElementById('loc-chip');
+  if (!chip) return;
+  chip.classList.toggle('warn', state.locationStatus !== 'ok');
+  if (state.locationStatus === 'ok') {
+    chip.textContent = `📍 GPS: ${fmt(state.lat, 4)}, ${fmt(state.lon, 4)}` +
+      (state.accuracy ? ` (±${Math.round(state.accuracy)} m)` : '');
+  } else {
+    chip.textContent = LOCATION_STATUS_TEXT[state.locationStatus] || LOCATION_STATUS_TEXT.unavailable;
+  }
 }
 
 // ---------- Geolocalización ----------
-function startGeolocation() {
+let geoWatchId = null;
+
+function stopGeolocation() {
+  if (geoWatchId !== null && 'geolocation' in navigator) {
+    navigator.geolocation.clearWatch(geoWatchId);
+    geoWatchId = null;
+  }
+}
+
+// highAccuracy=false se usa como segundo intento: en interiores o con mala
+// señal, exigir alta precisión puede agotar el timeout sin dar nunca una
+// posición, mientras que una posición aproximada (por red/wifi) sigue
+// siendo mucho mejor que quedarse en el valor por defecto de Paracuellos.
+function startGeolocation(highAccuracy = true) {
   return new Promise((resolve) => {
     if (!('geolocation' in navigator)) {
+      state.locationStatus = 'unsupported';
       state.usingDefaultLocation = true;
       updateSunForCurrentLocation();
       resolve(false);
       return;
     }
+    stopGeolocation();
     let resolved = false;
-    navigator.geolocation.watchPosition(
+    geoWatchId = navigator.geolocation.watchPosition(
       (pos) => {
         state.lat = pos.coords.latitude;
         state.lon = pos.coords.longitude;
+        state.accuracy = pos.coords.accuracy;
         state.usingDefaultLocation = false;
+        state.locationStatus = 'ok';
         updateSunForCurrentLocation();
         if (!resolved) { resolved = true; resolve(true); }
       },
-      () => {
-        state.usingDefaultLocation = true;
-        updateSunForCurrentLocation();
-        if (!resolved) { resolved = true; resolve(false); }
+      (err) => {
+        if (!resolved) {
+          resolved = true;
+          if (err.code === err.PERMISSION_DENIED) {
+            state.locationStatus = 'denied';
+            state.usingDefaultLocation = true;
+            updateSunForCurrentLocation();
+            resolve(false);
+          } else if (highAccuracy) {
+            // Reintento único con precisión reducida antes de rendirnos.
+            resolve(startGeolocation(false));
+          } else {
+            state.locationStatus = 'unavailable';
+            state.usingDefaultLocation = true;
+            updateSunForCurrentLocation();
+            resolve(false);
+          }
+        }
       },
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 8000 }
+      { enableHighAccuracy: highAccuracy, maximumAge: 5000, timeout: 10000 }
     );
     // por si watchPosition tarda más de lo esperado en la primera respuesta
     setTimeout(() => {
       if (!resolved) {
+        resolved = true;
+        state.locationStatus = 'unavailable';
         state.usingDefaultLocation = true;
         updateSunForCurrentLocation();
-        resolved = true; resolve(false);
+        resolve(false);
       }
-    }, 8000);
+    }, 10000);
   });
+}
+
+function retryGeolocation() {
+  state.locationStatus = 'pending';
+  updateSunForCurrentLocation();
+  startGeolocation(true);
 }
 
 // ---------- Orientación del dispositivo ----------
@@ -150,8 +211,7 @@ function drawArFrame() {
     }
 
     hud.innerHTML = `Sol: <b>${fmt(state.sun.altitude)}°</b> altura · <b>${fmt(state.sun.azimuth)}°</b> azimut
-      &nbsp;|&nbsp; Móvil: ${fmt(state.heading)}° rumbo, ${fmt(cameraElevation)}° elevación
-      ${state.usingDefaultLocation ? '<br><span style="color:#ffb547">Usando ubicación por defecto (Paracuellos) — activa el GPS para tu posición real</span>' : ''}`;
+      &nbsp;|&nbsp; Móvil: ${fmt(state.heading)}° rumbo, ${fmt(cameraElevation)}° elevación`;
   } else {
     hud.textContent = 'Esperando datos de brújula/orientación…';
   }
@@ -314,6 +374,7 @@ function setupTabs() {
     });
   });
   document.getElementById('horizon-btn').addEventListener('click', analyzeHorizon);
+  document.getElementById('loc-chip').addEventListener('click', retryGeolocation);
 }
 
 // ---------- Arranque ----------

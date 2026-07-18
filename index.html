@@ -41,6 +41,13 @@ body{
 .tab{ flex:1; padding:10px 4px; text-align:center; font-size:.8rem; color:var(--muted); background:none; border:none; }
 .tab.active{ color:var(--accent); border-bottom:2px solid var(--accent); }
 
+#loc-chip{
+  flex:0 0 auto; z-index:20; text-align:center; padding:5px 10px; font-size:.72rem;
+  background:var(--panel2); color:var(--ok); border:none; border-bottom:1px solid var(--line);
+  width:100%; cursor:pointer;
+}
+#loc-chip.warn{ color:var(--accent); }
+
 /* ---------- Views ---------- */
 .view{ position:relative; flex:1; overflow:hidden; display:none; }
 .view.active{ display:block; }
@@ -101,6 +108,7 @@ body{
   <button class="tab" data-view="horizon">Horizonte</button>
   <button class="tab" data-view="info">Sitios</button>
 </div>
+<button id="loc-chip">📍 Buscando tu ubicación…</button>
 
 <div id="view-ar" class="view active">
   <video id="ar-video" autoplay playsinline muted></video>
